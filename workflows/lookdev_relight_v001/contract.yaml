@@ -1,0 +1,138 @@
+name: lookdev_relight
+version: v001
+description: "SDXL + Depth ControlNet auxiliary lookdev relight pass"
+workflow_file: workflow_api.json
+colorspace: ACEScg
+
+resolution:
+  multiple_of: 32
+  min_width: 512
+  max_width: 4096
+  min_height: 512
+  max_height: 4096
+
+required_models:
+  - node_id: "1"
+    node_class: CheckpointLoaderSimple
+    input_name: ckpt_name
+    filename: sdxl_base_1.0.safetensors
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  - node_id: "2"
+    node_class: ControlNetLoader
+    input_name: control_net_name
+    filename: diffusers_xl_depth_full.safetensors
+    sha256: "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4"
+
+required_aovs:
+  - name: beauty
+    param_name: input_beauty
+    required: true
+    required_channels: ["R", "G", "B"]
+    expected_colorspace: ACEScg
+  - name: depth
+    param_name: input_depth
+    required: true
+    required_channels: []
+
+seed_param: seed
+
+postflight:
+  min_edge_iou: 0.85
+  max_temporal_delta: 0.20
+  min_pixel_std: 0.0001
+  allow_nan_or_inf: false
+  expected_channels: 3
+
+exposed_params:
+  seed:
+    node_id: "9"
+    input_name: seed
+    param_type: int
+    required: true
+    default: 42
+    min_value: 0
+    max_value: 2147483647
+    per_frame: true
+    is_seed: true
+    description: "Deterministic per-frame base seed"
+  steps:
+    node_id: "9"
+    input_name: steps
+    param_type: int
+    required: true
+    default: 24
+    min_value: 4
+    max_value: 60
+    description: "Sampler step count"
+  cfg:
+    node_id: "9"
+    input_name: cfg
+    param_type: float
+    required: true
+    default: 6.5
+    min_value: 1.0
+    max_value: 15.0
+    description: "Classifier-free guidance scale"
+  denoise:
+    node_id: "9"
+    input_name: denoise
+    param_type: float
+    required: true
+    default: 0.45
+    min_value: 0.05
+    max_value: 0.85
+    description: "Denoising strength for lookdev relight"
+  sampler_name:
+    node_id: "9"
+    input_name: sampler_name
+    param_type: enum
+    required: true
+    default: dpmpp_2m
+    choices: ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_sde"]
+    description: "Approved deterministic sampler"
+  controlnet_strength:
+    node_id: "7"
+    input_name: strength
+    param_type: float
+    required: true
+    default: 0.85
+    min_value: 0.0
+    max_value: 1.0
+    description: "Depth ControlNet guidance weight"
+  positive_prompt:
+    node_id: "5"
+    input_name: text
+    param_type: string
+    required: true
+    default: "cinematic rim lighting, physically plausible lookdev relight, neutral exposure"
+    description: "Positive lookdev lighting prompt"
+  negative_prompt:
+    node_id: "6"
+    input_name: text
+    param_type: string
+    required: false
+    default: "watermark, text, oversaturated, chromatic aberration, blurry"
+    description: "Negative prompt"
+  input_beauty:
+    node_id: "3"
+    input_name: image
+    param_type: file_path
+    required: true
+    per_frame: true
+    description: "Input CG beauty pass"
+  input_depth:
+    node_id: "4"
+    input_name: image
+    param_type: file_path
+    required: true
+    per_frame: true
+    description: "Input CG depth/Z pass"
+  output_prefix:
+    node_id: "11"
+    input_name: filename_prefix
+    param_type: string
+    required: true
+    default: "comfyguard_relight"
+    per_frame: true
+    is_output_prefix: true
+    description: "Versioned output filename prefix"

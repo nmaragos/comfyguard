@@ -1,0 +1,51 @@
+[project]
+name = "comfyguard"
+version = "0.1.0"
+description = "Deterministic ComfyUI Pipeline Broker & Contract Gatekeeper"
+readme = "README.md"
+authors = [
+    { name = "Nikolaos Maragkos", email = "nmaragos@outlook.com" },
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "aiohttp>=3.9",
+    "websockets>=12.0",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+oiio = ["OpenImageIO"]
+
+[project.scripts]
+comfyguard = "comfyguard.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"package.py" = ["F821"]

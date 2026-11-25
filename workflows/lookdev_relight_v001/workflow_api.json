@@ -1,0 +1,85 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sdxl_base_1.0.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "ControlNetLoader",
+    "inputs": {
+      "control_net_name": "diffusers_xl_depth_full.safetensors"
+    }
+  },
+  "3": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "beauty.1001.exr"
+    }
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "depth.1001.exr"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "cinematic rim lighting, physically plausible lookdev relight, neutral exposure"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "watermark, text, oversaturated, chromatic aberration, blurry"
+    }
+  },
+  "7": {
+    "class_type": "ControlNetApply",
+    "inputs": {
+      "conditioning": ["5", 0],
+      "control_net": ["2", 0],
+      "image": ["4", 0],
+      "strength": 0.85
+    }
+  },
+  "8": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["3", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "cfg": 6.5,
+      "denoise": 0.45,
+      "latent_image": ["8", 0],
+      "model": ["1", 0],
+      "negative": ["6", 0],
+      "positive": ["7", 0],
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "seed": 42,
+      "steps": 24
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["9", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "11": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "comfyguard_relight",
+      "images": ["10", 0]
+    }
+  }
+}
