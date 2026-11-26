@@ -1,5 +1,31 @@
 """DCC and render-farm submission wrappers for ComfyGuard."""
 
+from comfyguard.dcc.houdini_hook import (
+    HoudiniSubmissionOutcome,
+    HoudiniUnavailableError,
+    build_job_from_houdini,
+    build_job_from_pdg_work_item,
+    capture_houdini_context,
+    extract_houdini_frame_range,
+    format_houdini_sequence_pattern,
+    normalize_houdini_frame_pattern,
+    submit_from_houdini,
+    submit_from_houdini_async,
+    write_result_to_hda_node,
+)
+from comfyguard.dcc.nuke_hook import (
+    NukeSubmissionOutcome,
+    NukeUnavailableError,
+    build_job_from_nuke,
+    capture_nuke_context,
+    create_nuke_submit_node,
+    create_read_node_for_result,
+    extract_nuke_inputs,
+    format_nuke_sequence_pattern,
+    register_nuke_menu,
+    submit_from_nuke,
+    submit_from_nuke_async,
+)
 from comfyguard.dcc.submitter import (
     DCCContext,
     PipelineOrchestrator,
@@ -11,9 +37,31 @@ from comfyguard.dcc.submitter import (
 
 __all__ = [
     "DCCContext",
+    "HoudiniSubmissionOutcome",
+    "HoudiniUnavailableError",
+    "NukeSubmissionOutcome",
+    "NukeUnavailableError",
     "PipelineOrchestrator",
     "SubmissionResult",
+    "build_job_from_houdini",
+    "build_job_from_nuke",
+    "build_job_from_pdg_work_item",
     "build_job_request",
+    "capture_houdini_context",
+    "capture_nuke_context",
+    "create_nuke_submit_node",
+    "create_read_node_for_result",
+    "extract_houdini_frame_range",
+    "extract_nuke_inputs",
+    "format_houdini_sequence_pattern",
+    "format_nuke_sequence_pattern",
     "generate_deadline_job_info",
+    "normalize_houdini_frame_pattern",
+    "register_nuke_menu",
     "submit_from_dcc",
+    "submit_from_houdini",
+    "submit_from_houdini_async",
+    "submit_from_nuke",
+    "submit_from_nuke_async",
+    "write_result_to_hda_node",
 ]

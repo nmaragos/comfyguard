@@ -14,6 +14,12 @@ import yaml
 
 from comfyguard.broker.client import ComfyUIClient, ComfyUIConnectionError
 from comfyguard.broker.mutator import GraphMutator, graph_diff
+from comfyguard.broker.smoke import (
+    DEFAULT_LOCAL_ENDPOINTS,
+    discover_live_endpoint,
+    probe_worker,
+    run_smoke_test,
+)
 from comfyguard.contracts.manifest import LineageManifest, ValidationReport
 from comfyguard.contracts.schema import JobRequest
 from comfyguard.dcc.submitter import PipelineOrchestrator
@@ -139,6 +145,20 @@ def submit(
         bool,
         typer.Option("--atomic-quarantine", help="Quarantine entire job if any frame fails."),
     ] = False,
+    upload_inputs: Annotated[
+        bool,
+        typer.Option(
+            "--upload-inputs/--no-upload-inputs",
+            help="Stage local input frames via POST /upload/image before dispatch.",
+        ),
+    ] = False,
+    upload_subfolder: Annotated[
+        str | None,
+        typer.Option(
+            "--upload-subfolder",
+            help="Optional ComfyUI input subfolder prefix when --upload-inputs is enabled.",
+        ),
+    ] = None,
 ) -> None:
     """Validate, execute on ComfyUI worker(s), post-flight gate, and publish or quarantine."""
     job_req = _load_job_file(job)
@@ -165,17 +185,27 @@ def submit(
             )
         return
 
-    res = asyncio.run(
-        PipelineOrchestrator().run_job(
-            job_req,
-            endpoints=endpoints,
-            models_dir=models_dir,
-            skip_model_check=skip_model_check,
-            atomic_job_quarantine=atomic_quarantine,
-            dcc_source="cli",
+    try:
+        res = asyncio.run(
+            PipelineOrchestrator().run_job(
+                job_req,
+                endpoints=endpoints,
+                models_dir=models_dir,
+                skip_model_check=skip_model_check,
+                atomic_job_quarantine=atomic_quarantine,
+                dcc_source="cli",
+                upload_inputs=upload_inputs,
+                upload_subfolder=upload_subfolder,
+            )
         )
-    )
+    except ComfyUIConnectionError as exc:
+        typer.echo(f"Error communicating with ComfyUI worker(s): {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
     _print_report(res.preflight_report)
+    if res.staged_inputs:
+        total_uploads = sum(len(aovs) for aovs in res.staged_inputs.values())
+        typer.echo(f"Staged inputs: {total_uploads} frame upload(s) via /upload/image")
     if res.postflight_report is not None:
         _print_report(res.postflight_report)
 
@@ -271,28 +301,150 @@ def inspect(
 
 @app.command("worker-status")
 def worker_status(
-    endpoint: Annotated[str, typer.Argument(help="ComfyUI worker base URL.")],
+    endpoint: Annotated[
+        str | None,
+        typer.Argument(
+            help="ComfyUI worker base URL (auto-probes :8188 and :8000 if omitted)."
+        ),
+    ] = None,
 ) -> None:
-    """Query live /queue and /object_info status from a ComfyUI worker."""
+    """Query live /queue, /object_info, and installed checkpoints from a ComfyUI worker."""
+    if endpoint is None:
+        probe = asyncio.run(discover_live_endpoint())
+        if probe is None:
+            checked = ", ".join(DEFAULT_LOCAL_ENDPOINTS)
+            typer.echo(f"Workers unreachable ({checked})", err=True)
+            raise typer.Exit(code=1)
+    else:
+        probe = asyncio.run(probe_worker(endpoint))
+        if not probe.online:
+            typer.echo(f"Worker unreachable ({probe.endpoint}): {probe.error}", err=True)
+            raise typer.Exit(code=1)
 
-    async def _query() -> tuple[dict[str, Any], dict[str, Any]]:
-        async with ComfyUIClient(endpoint) as client:
-            queue = await client.get_queue_status()
-            obj_info = await client.get_object_info()
-            return queue, obj_info
-
-    try:
-        queue, obj_info = asyncio.run(_query())
-    except ComfyUIConnectionError as exc:
-        typer.echo(f"Worker unreachable ({endpoint}): {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-
-    running = len(queue.get("queue_running", []))
-    pending = len(queue.get("queue_pending", []))
     typer.echo(
-        f"Worker {endpoint}: ONLINE | running={running} pending={pending} "
-        f"registered_nodes={len(obj_info)}"
+        f"Worker {probe.endpoint}: ONLINE | running={probe.queue_running} "
+        f"pending={probe.queue_pending} registered_nodes={probe.registered_nodes} "
+        f"checkpoints={len(probe.checkpoints)}"
     )
+    if probe.checkpoints:
+        preview = ", ".join(probe.checkpoints[:5])
+        more = f" (+{len(probe.checkpoints) - 5} more)" if len(probe.checkpoints) > 5 else ""
+        typer.echo(f"  Checkpoints: {preview}{more}")
+    else:
+        typer.echo(
+            "  Checkpoints: NONE FOUND "
+            "(install a .safetensors model in ComfyUI models/checkpoints)",
+            err=True,
+        )
+
+
+@app.command("smoke-test")
+def smoke_test(
+    endpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--endpoint",
+            help="ComfyUI worker URL (auto-probes :8188 and ComfyUI Desktop :8000 if omitted).",
+        ),
+    ] = None,
+    checkpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--checkpoint",
+            help="Checkpoint filename from /object_info (defaults to first installed).",
+        ),
+    ] = None,
+    width: Annotated[
+        int,
+        typer.Option("--width", help="Test plate width in pixels (multiple of 32)."),
+    ] = 512,
+    height: Annotated[
+        int,
+        typer.Option("--height", help="Test plate height in pixels (multiple of 32)."),
+    ] = 512,
+    steps: Annotated[int, typer.Option("--steps", help="KSampler step count.")] = 4,
+    denoise: Annotated[
+        float,
+        typer.Option("--denoise", help="KSampler denoise strength (0.01..1.0)."),
+    ] = 0.15,
+    min_edge_iou: Annotated[
+        float,
+        typer.Option("--min-edge-iou", help="Minimum Sobel edge IoU threshold."),
+    ] = 0.25,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option("--output-dir", help="Optional directory to persist smoke-test outputs."),
+    ] = None,
+    timeout: Annotated[
+        float,
+        typer.Option("--timeout", help="Execution timeout in seconds."),
+    ] = 180.0,
+    check_only: Annotated[
+        bool,
+        typer.Option(
+            "--check-only",
+            help="Verify ComfyUI reachability and installed checkpoints without running GPU work.",
+        ),
+    ] = False,
+    upload_inputs: Annotated[
+        bool,
+        typer.Option(
+            "--upload-inputs/--no-upload-inputs",
+            help="Stage test plate via POST /upload/image before execution.",
+        ),
+    ] = True,
+) -> None:
+    """Probe a live ComfyUI worker and run an end-to-end img2img + EXR provenance smoke test."""
+    try:
+        res = asyncio.run(
+            run_smoke_test(
+                endpoint=endpoint,
+                checkpoint=checkpoint,
+                width=width,
+                height=height,
+                steps=steps,
+                denoise=denoise,
+                min_edge_iou=min_edge_iou,
+                output_dir=output_dir,
+                timeout=timeout,
+                check_only=check_only,
+                upload_inputs=upload_inputs,
+            )
+        )
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(res.message)
+    if res.probe.online:
+        typer.echo(
+            f"  Endpoint: {res.probe.endpoint} | nodes={res.probe.registered_nodes} "
+            f"checkpoints={len(res.probe.checkpoints)}"
+        )
+        if res.probe.checkpoints:
+            preview = ", ".join(res.probe.checkpoints[:5])
+            more = (
+                f" (+{len(res.probe.checkpoints) - 5} more)"
+                if len(res.probe.checkpoints) > 5
+                else ""
+            )
+            typer.echo(f"  Available checkpoints: {preview}{more}")
+
+    if res.submission is not None:
+        _print_report(res.submission.preflight_report)
+        if res.submission.staged_inputs:
+            total_uploads = sum(len(aovs) for aovs in res.submission.staged_inputs.values())
+            typer.echo(f"  Staged inputs: {total_uploads} upload(s) via /upload/image")
+        if res.submission.postflight_report is not None:
+            _print_report(res.submission.postflight_report)
+        if res.published_exr is not None:
+            typer.echo(f"  Published EXR: {res.published_exr}")
+            for key in ("comfyguard:seed", "comfyguard:colorspace", "comfyguard:graph_hash"):
+                if key in res.exr_attributes:
+                    typer.echo(f"    {key}: {res.exr_attributes[key]}")
+
+    if not res.passed:
+        raise typer.Exit(code=1)
 
 
 @app.command()

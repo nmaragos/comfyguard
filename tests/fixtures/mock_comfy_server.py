@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -31,10 +32,14 @@ class MockComfyUIServer:
         behaviors: list[str] | None = None,
         default_behavior: str = "success",
         step_delay: float = 0.005,
+        render_fn: Callable[[dict[str, Any]], bytes] | None = None,
+        object_info: dict[str, Any] | None = None,
     ) -> None:
         self.behaviors: deque[str] = deque(behaviors or [])
         self.default_behavior = default_behavior
         self.step_delay = step_delay
+        self.render_fn = render_fn
+        self._object_info = object_info
 
         self.queued_prompts: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
@@ -125,6 +130,8 @@ class MockComfyUIServer:
         return ws
 
     async def _handle_object_info(self, _request: web.Request) -> web.Response:
+        if self._object_info is not None:
+            return web.json_response(self._object_info)
         return web.json_response(json.loads(MOCK_OBJECT_INFO_PATH.read_text(encoding="utf-8")))
 
     async def _handle_queue(self, _request: web.Request) -> web.Response:
@@ -285,24 +292,35 @@ class MockComfyUIServer:
                 return
 
             prefix = "comfyguard"
-            if isinstance(graph, dict) and "11" in graph:
-                inputs = graph["11"].get("inputs", {})
-                if isinstance(inputs, dict) and "filename_prefix" in inputs:
-                    prefix = str(inputs["filename_prefix"])
+            save_node_id = "11"
+            if isinstance(graph, dict):
+                if "11" in graph:
+                    save_node_id = "11"
+                else:
+                    for nid, node in graph.items():
+                        if isinstance(node, dict) and node.get("class_type") == "SaveImage":
+                            save_node_id = str(nid)
+                            break
+                if save_node_id in graph:
+                    inputs = graph[save_node_id].get("inputs", {})
+                    if isinstance(inputs, dict) and "filename_prefix" in inputs:
+                        prefix = str(inputs["filename_prefix"])
             filename = f"{prefix}_{prompt_id}.png"
-            self.outputs_data[filename] = _make_png_bytes()
+            self.outputs_data[filename] = (
+                self.render_fn(graph) if self.render_fn is not None else _make_png_bytes()
+            )
 
             node_output = {
                 "images": [{"filename": filename, "subfolder": "", "type": "output"}]
             }
             self.history[prompt_id] = {
-                "outputs": {"11": node_output},
+                "outputs": {save_node_id: node_output},
                 "status": {"completed": True},
             }
             await self._send_ws(
                 client_id,
                 "executed",
-                {"prompt_id": prompt_id, "node": "11", "output": node_output},
+                {"prompt_id": prompt_id, "node": save_node_id, "output": node_output},
             )
             await self._send_ws(
                 client_id, "executing", {"prompt_id": prompt_id, "node": None}

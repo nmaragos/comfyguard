@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from comfyguard.cli import app
 from comfyguard.publish.exr_io import write_exr
-from comfyguard.ui.demo_runner import render_plate_rgb, run_portfolio_scenarios, save_png
+from comfyguard.ui.demo_runner import png_bytes, render_plate_rgb, run_portfolio_scenarios, save_png
 from comfyguard.ui.report import scan_workspace_jobs
 from comfyguard.ui.server import DashboardServer
 from comfyguard.ui.visuals import (
@@ -147,3 +147,41 @@ def test_cli_ui_help() -> None:
     clean = re.sub(r"\x1b\[[0-9;]*m", "", res.stdout)
     assert "--demo" in clean
     assert "--port" in clean
+
+
+def test_showcase_storyboard_and_animated_gif_encoding(tmp_path: Path) -> None:
+    import pytest
+    from demo.capture_showcase import (
+        build_default_storyboard,
+        encode_animated_gif,
+        find_browser_executable,
+    )
+    from PIL import Image
+
+    steps = build_default_storyboard()
+    assert len(steps) >= 10
+    assert any("SCENARIO 2" in s.script for s in steps)
+    assert any("submitDiff" in s.script for s in steps)
+
+    with pytest.raises(FileNotFoundError):
+        find_browser_executable("definitely_missing_browser_binary_xyz")
+
+    fake_exe = tmp_path / "chrome.exe"
+    fake_exe.write_bytes(b"")
+    assert find_browser_executable(str(fake_exe)) == fake_exe
+
+    frames = [
+        png_bytes(render_plate_rgb(320, 180, rim_boost=0.2 * idx))
+        for idx in range(4)
+    ]
+    out_gif = encode_animated_gif(
+        frames,
+        [200, 200, 200, 400],
+        tmp_path / "showcase.gif",
+        max_width=240,
+    )
+    assert out_gif.is_file()
+    with Image.open(out_gif) as gif:
+        assert getattr(gif, "is_animated", False) is True
+        assert getattr(gif, "n_frames", 0) == 4
+        assert gif.size == (240, 135)

@@ -324,12 +324,20 @@ class GraphMutator:
             input_files=resolved_inputs,
         )
 
-    def mutate_for_job(self, job: JobRequest) -> list[MutatedFrameGraph]:
+    def mutate_for_job(
+        self,
+        job: JobRequest,
+        *,
+        input_overrides: dict[int, dict[str, str]] | None = None,
+    ) -> list[MutatedFrameGraph]:
         """Generate mutated graphs for every frame in a JobRequest."""
         frames: list[MutatedFrameGraph] = []
         for frame in job.frame_range.frames():
+            frame_overrides = (input_overrides or {}).get(frame, {})
             frame_inputs = {
-                aov_name: str(job.resolve_input_frame(aov_name, frame))
+                aov_name: frame_overrides.get(
+                    aov_name, str(job.resolve_input_frame(aov_name, frame))
+                )
                 for aov_name in job.input_sequences
             }
             output_prefix = (

@@ -73,6 +73,7 @@ class SubmissionResult(BaseModel):
     postflight_report: ValidationReport | None = None
     publish_result: PublishResult | None = None
     broker_snapshots: list[BrokerJobSnapshot] = Field(default_factory=list)
+    staged_inputs: dict[int, dict[str, str]] = Field(default_factory=dict)
     passed: bool
 
 
@@ -159,6 +160,52 @@ def _worker_url_map(endpoints: Sequence[WorkerConfig | str]) -> dict[str, str]:
 class PipelineOrchestrator:
     """Coordinates Pre-Flight -> Graph Mutation -> WorkerPool -> Post-Flight -> Publisher."""
 
+    async def _stage_inputs_to_workers(
+        self,
+        job: JobRequest,
+        worker_urls: dict[str, str],
+        *,
+        upload_subfolder: str | None = None,
+    ) -> dict[int, dict[str, str]]:
+        unique_urls = list(dict.fromkeys(worker_urls.values()))
+        if not unique_urls:
+            return {}
+
+        base_sub = (
+            upload_subfolder.strip("/\\").replace("\\", "/")
+            if upload_subfolder is not None
+            else f"comfyguard_{job.job_id}"
+        )
+        staged: dict[int, dict[str, str]] = {}
+        clients = [ComfyUIClient(url) for url in unique_urls]
+        try:
+            for frame in job.frame_range.frames():
+                frame_refs: dict[str, str] = {}
+                for aov_name in sorted(job.input_sequences):
+                    local_path = job.resolve_input_frame(aov_name, frame)
+                    subfolder = f"{base_sub}_{aov_name}" if base_sub else aov_name
+                    remote_ref: str | None = None
+                    for client in clients:
+                        resp = await client.upload_image(
+                            local_path,
+                            subfolder=subfolder,
+                            overwrite=True,
+                        )
+                        uploaded_name = str(resp.get("name") or local_path.name)
+                        uploaded_sub = (
+                            str(resp.get("subfolder") or "").strip("/\\").replace("\\", "/")
+                        )
+                        ref = f"{uploaded_sub}/{uploaded_name}" if uploaded_sub else uploaded_name
+                        if remote_ref is None:
+                            remote_ref = ref
+                    assert remote_ref is not None
+                    frame_refs[aov_name] = remote_ref
+                staged[frame] = frame_refs
+        finally:
+            for client in clients:
+                await client.close()
+        return staged
+
     async def run_job(
         self,
         job: JobRequest,
@@ -174,6 +221,8 @@ class PipelineOrchestrator:
         reference_aov: str | None = "depth",
         atomic_job_quarantine: bool = False,
         dcc_source: str | None = None,
+        upload_inputs: bool = False,
+        upload_subfolder: str | None = None,
     ) -> SubmissionResult:
         """Execute a complete contract-gated ComfyGuard job."""
         mutator = GraphMutator.from_workflow_dir(job.workflow_dir)
@@ -204,7 +253,18 @@ class PipelineOrchestrator:
                 passed=False,
             )
 
-        mutated_frames = mutator.mutate_for_job(job)
+        staged_inputs: dict[int, dict[str, str]] = {}
+        if upload_inputs:
+            staged_inputs = await self._stage_inputs_to_workers(
+                job,
+                worker_urls,
+                upload_subfolder=upload_subfolder,
+            )
+
+        mutated_frames = mutator.mutate_for_job(
+            job,
+            input_overrides=staged_inputs or None,
+        )
 
         async with WorkerPool(
             endpoints,
@@ -272,13 +332,17 @@ class PipelineOrchestrator:
                         reference_path=ref_path,
                     )
                 )
+                local_input_files = {
+                    aov_name: str(job.resolve_input_frame(aov_name, frame))
+                    for aov_name in job.input_sequences
+                }
                 publish_inputs.append(
                     FramePublishInput(
                         frame=frame,
                         seed=mutated.seed,
                         graph_sha256=mutated.graph_sha256,
                         source_path=staged_file,
-                        input_files=mutated.input_files,
+                        input_files=local_input_files,
                         prompt_id=snap.prompt_id,
                     )
                 )
@@ -307,6 +371,7 @@ class PipelineOrchestrator:
                 postflight_report=postflight_res.report,
                 publish_result=publish_res,
                 broker_snapshots=snapshots,
+                staged_inputs=staged_inputs,
                 passed=preflight_report.passed and postflight_res.report.passed and all_completed,
             )
         finally:

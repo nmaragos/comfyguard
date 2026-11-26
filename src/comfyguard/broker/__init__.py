@@ -33,6 +33,14 @@ from comfyguard.broker.pool import (
     WorkerConfig,
     WorkerPool,
 )
+from comfyguard.broker.smoke import (
+    DEFAULT_LOCAL_ENDPOINTS,
+    SmokeTestResult,
+    WorkerProbeResult,
+    discover_live_endpoint,
+    probe_worker,
+    run_smoke_test,
+)
 
 __all__ = [
     "BrokerJobSnapshot",
@@ -43,6 +51,7 @@ __all__ = [
     "ComfyUIExecutionError",
     "ComfyUIOOMError",
     "ComfyUITimeoutError",
+    "DEFAULT_LOCAL_ENDPOINTS",
     "GraphDiff",
     "GraphMutationError",
     "GraphMutator",
@@ -57,9 +66,14 @@ __all__ = [
     "PromptExecutionResult",
     "QueueFullError",
     "RetryPolicy",
+    "SmokeTestResult",
     "WorkerConfig",
     "WorkerPool",
+    "WorkerProbeResult",
     "compute_graph_sha256",
     "detect_cuda_oom",
+    "discover_live_endpoint",
     "graph_diff",
+    "probe_worker",
+    "run_smoke_test",
 ]

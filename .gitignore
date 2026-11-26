@@ -14,3 +14,10 @@ wheels/
 # Tool caches
 .pytest_cache/
 .ruff_cache/
+
+# Local DCC dependencies and demo/smoke outputs
+.nuke_deps/
+nuke_demo/
+smoke_out/
+site/
+demo_report.html
