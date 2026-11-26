@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import aiohttp
@@ -140,7 +141,8 @@ async def test_dashboard_server_api_end_to_end() -> None:
 
 
 def test_cli_ui_help() -> None:
-    res = runner.invoke(app, ["ui", "--help"])
+    res = runner.invoke(app, ["ui", "--help"], env={"NO_COLOR": "1"})
     assert res.exit_code == 0
-    assert "--demo" in res.stdout
-    assert "--port" in res.stdout
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", res.stdout)
+    assert "--demo" in clean
+    assert "--port" in clean
