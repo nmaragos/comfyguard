@@ -239,7 +239,7 @@ pre.codebox {
 }
 """
 
-DASHBOARD_HTML = """<!DOCTYPE html>
+DASHBOARD_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -699,7 +699,7 @@ fetchState();
 </html>
 """.replace("__SHARED_CSS__", _SHARED_CSS)
 
-STATIC_REPORT_HTML = """<!DOCTYPE html>
+STATIC_REPORT_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />

@@ -69,6 +69,7 @@ async def test_static_html_report_and_workspace_scan(tmp_path: Path) -> None:
     assert "comfyguard:graph_hash" in html
     assert "comfyguard:colorspace" in html
     assert "Graph Diff" in html
+    assert r"changes.join('\n')" in html
     assert len(res["visual_jobs"]) == 3
 
     discovered = scan_workspace_jobs(workspace / "publish")
