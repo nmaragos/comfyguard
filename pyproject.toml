@@ -49,3 +49,4 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 "package.py" = ["F821"]
+"src/comfyguard/ui/templates.py" = ["E501"]

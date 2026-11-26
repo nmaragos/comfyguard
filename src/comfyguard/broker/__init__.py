@@ -1,5 +1,18 @@
 """Broker client, worker pool, and typed graph mutator."""
 
+from comfyguard.broker.client import (
+    ComfyUICancelledError,
+    ComfyUIClient,
+    ComfyUIConnectionError,
+    ComfyUIError,
+    ComfyUIExecutionError,
+    ComfyUIOOMError,
+    ComfyUITimeoutError,
+    OutputArtifact,
+    ProgressEvent,
+    PromptExecutionResult,
+    detect_cuda_oom,
+)
 from comfyguard.broker.mutator import (
     GraphDiff,
     GraphMutationError,
@@ -12,16 +25,41 @@ from comfyguard.broker.mutator import (
     compute_graph_sha256,
     graph_diff,
 )
+from comfyguard.broker.pool import (
+    BrokerJobSnapshot,
+    JobStatus,
+    QueueFullError,
+    RetryPolicy,
+    WorkerConfig,
+    WorkerPool,
+)
 
 __all__ = [
+    "BrokerJobSnapshot",
+    "ComfyUICancelledError",
+    "ComfyUIClient",
+    "ComfyUIConnectionError",
+    "ComfyUIError",
+    "ComfyUIExecutionError",
+    "ComfyUIOOMError",
+    "ComfyUITimeoutError",
     "GraphDiff",
     "GraphMutationError",
     "GraphMutator",
+    "JobStatus",
     "MutatedFrameGraph",
     "NodeClassChange",
     "NodeInputChange",
     "NodeReferenceError",
+    "OutputArtifact",
     "ParamValidationError",
+    "ProgressEvent",
+    "PromptExecutionResult",
+    "QueueFullError",
+    "RetryPolicy",
+    "WorkerConfig",
+    "WorkerPool",
     "compute_graph_sha256",
+    "detect_cuda_oom",
     "graph_diff",
 ]
