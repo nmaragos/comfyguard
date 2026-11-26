@@ -1,10 +1,13 @@
 # ComfyGuard
 
 [![CI](https://github.com/nmaragos/comfyguard/actions/workflows/ci.yml/badge.svg)](https://github.com/nmaragos/comfyguard/actions/workflows/ci.yml)
+[![Live Demo](https://img.shields.io/badge/demo-live%20interactive%20console-22c55e)](https://nmaragos.github.io/comfyguard/)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Packaging Rez / uv](https://img.shields.io/badge/packaging-Rez%20%7C%20uv-0ea5e9)
 
 **Deterministic ComfyUI Pipeline Broker & Contract Gatekeeper for VFX**
+
+> **[Open the Live Interactive Demo Console →](https://nmaragos.github.io/comfyguard/)** (hosted on GitHub Pages, rebuilt automatically on every CI run)
 
 ComfyGuard treats generative AI (ComfyUI) like an untrusted, non-deterministic render engine. Rather than artists manually running workflows and dropping PNGs into shot directories, ComfyGuard sits headlessly between DCC/farm submissions (Houdini, Nuke, Maya, Deadline, Rez) and ComfyUI workers—enforcing strict pre-flight contracts, typed graph mutation, post-flight buffer/edge/temporal checks, OpenEXR metadata provenance, and automatic frame quarantine.
 
@@ -54,7 +57,8 @@ uv run ruff check src tests demo package.py
 
 ## Visual Dashboard & HTML Report
 
-- **`comfyguard ui --demo`** launches an interactive local studio dashboard (`http://127.0.0.1:8788`) featuring:
+- **Online Demo**: [https://nmaragos.github.io/comfyguard/](https://nmaragos.github.io/comfyguard/) — Live interactive console deployed automatically via GitHub Pages.
+- **`comfyguard ui --demo`** launches the local studio dashboard (`http://127.0.0.1:8788`) featuring:
   - **Live Scenario Runner & Worker Pool Monitor**: Trigger Scenario 1 (`1920x1080` pre-flight block), Scenario 2 (edge-drift quarantine), and Scenario 3 (2-worker clean EXR publish) on demand, or inspect real published/quarantined shot folders via `--root <dir>`.
   - **Before/After Wipe & Sobel Edge-Drift Diagnostic**: Interactive comparison slider paired with color-coded Sobel edge overlays (green = matched geometry, cyan = missing CG edge, red = drifted AI edge) and IoU / temporal delta meters.
   - **EXR Stamps & Graph Diff Sandbox**: View stamped `comfyguard:*` OpenEXR header attributes, `LineageManifest` JSON, and interactively test contract-validated `graph_diff` overrides.

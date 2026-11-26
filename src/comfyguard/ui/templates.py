@@ -162,16 +162,6 @@ pre.codebox {
   color: #cbd5e1;
   margin: 0;
 }
-"""
-
-DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ComfyGuard — Pipeline Gatekeeper Console</title>
-<style>
-__SHARED_CSS__
 .topbar {
   display: flex;
   flex-wrap: wrap;
@@ -247,6 +237,16 @@ __SHARED_CSS__
   padding: 8px 10px; border-radius: 8px; background: var(--panel-2);
   border: 1px solid var(--border); font-size: 12px; margin-top: 8px;
 }
+"""
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ComfyGuard — Pipeline Gatekeeper Console</title>
+<style>
+__SHARED_CSS__
 </style>
 </head>
 <body>
@@ -704,21 +704,77 @@ STATIC_REPORT_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ComfyGuard — Visual Pipeline Report</title>
+<title>ComfyGuard — Live Interactive Pipeline Demo</title>
 <style>
 __SHARED_CSS__
-.wrap { max-width: 1380px; margin: 0 auto; padding: 22px; }
-.scenario-card { margin-top: 20px; }
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
-.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
-.dot { width: 10px; height: 10px; border-radius: 99px; display: inline-block; margin-right: 4px; }
 </style>
 </head>
 <body>
-<div class="wrap" id="root"></div>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">CG</div>
+    <div>
+      <div style="font-weight:700;font-size:16px;">ComfyGuard Pipeline Console</div>
+      <div style="font-size:12px;color:var(--muted);">
+        Deterministic AI Pass Broker &amp; Contract Gatekeeper
+      </div>
+    </div>
+  </div>
+  <div class="actions">
+    <span class="badge badge-pass">Live Interactive Demo</span>
+    <span class="mono" style="font-size:11px;color:var(--muted);" id="gen-ts"></span>
+    <a class="btn" href="https://github.com/nmaragos/comfyguard" target="_blank" rel="noopener">
+      GitHub Repo
+    </a>
+  </div>
+</header>
+
+<div style="padding:14px 22px 0;max-width:1600px;margin:0 auto;">
+  <div class="kpi-grid" id="kpis"></div>
+</div>
+
+<main class="layout">
+  <aside class="sidebar">
+    <section class="card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;">Worker Pool &amp; Queue</div>
+      <div style="font-size:12px;color:var(--muted);">
+        Pre/Post-Flight Gatekeeper Snapshot
+      </div>
+      <div class="worker-row">
+        <div>
+          <div style="font-weight:600;">mock-gpu-0</div>
+          <div class="mono" style="font-size:11px;color:var(--muted);">in-process://mock-0</div>
+        </div>
+        <span class="badge badge-pass">VERIFIED</span>
+      </div>
+      <div class="worker-row">
+        <div>
+          <div style="font-weight:600;">mock-gpu-1</div>
+          <div class="mono" style="font-size:11px;color:var(--muted);">in-process://mock-1</div>
+        </div>
+        <span class="badge badge-pass">VERIFIED</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:13px;">Submission Queue</div>
+        <span class="mono" style="font-size:11px;color:var(--muted);" id="job-count">0 jobs</span>
+      </div>
+      <div id="jobs-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </section>
+  </aside>
+
+  <section class="card" id="detail-pane"></section>
+</main>
+
 <script>
 const REPORT = __REPORT_DATA_JSON__;
+const JOBS = [...(REPORT.jobs || [])].reverse();
+let selectedJobId = (JOBS.find(j => j.status === 'QUARANTINED') || JOBS[0] || {}).job_id || null;
+let selectedFrameIdx = 0;
+let activeTab = 'visual';
+let currentDiffText = REPORT.graph_diff ? REPORT.graph_diff.human_text : '';
 
 function esc(s) {
   return String(s ?? '')
@@ -728,7 +784,7 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-function badge(status) {
+function statusBadge(status) {
   if (status === 'PUBLISHED' || status === 'published' || status === 'pass') {
     return '<span class="badge badge-pass">' + esc(status) + '</span>';
   }
@@ -738,141 +794,334 @@ function badge(status) {
   return '<span class="badge badge-fail">' + esc(status) + '</span>';
 }
 
-function moveWipe(idx, val) {
-  const top = document.getElementById('wtop-' + idx);
-  const div = document.getElementById('wdiv-' + idx);
-  if (top && div) {
-    top.style.clipPath = `inset(0 ${100 - Number(val)}% 0 0)`;
-    div.style.left = val + '%';
-  }
-}
-
-(function render() {
-  const jobs = REPORT.jobs || [];
-  let pub = 0, quar = 0, preBlocked = 0;
-  jobs.forEach(j => {
-    if (j.status === 'PREFLIGHT_REJECTED') preBlocked++;
+function renderSidebarAndKPIs() {
+  document.getElementById('gen-ts').textContent = 'Built ' + String(REPORT.generated_at || '').slice(0, 19).replace('T', ' ') + ' UTC';
+  let pub = 0, quar = 0, preBlocked = 0, saved = 0;
+  JOBS.forEach(j => {
+    if (j.status === 'PREFLIGHT_REJECTED') {
+      preBlocked++;
+      saved += Math.max((j.frames || []).length, 1);
+    }
     (j.frames || []).forEach(f => {
       if (f.status === 'published') pub++;
       if (f.status === 'quarantined') quar++;
     });
   });
 
-  let html = `
-    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;
-                gap:12px;margin-bottom:16px;">
+  document.getElementById('kpis').innerHTML = [
+    ['Total Jobs', JOBS.length, 'var(--text)'],
+    ['Published EXRs', pub, 'var(--pass)'],
+    ['Quarantined Frames', quar, 'var(--warn)'],
+    ['Pre-Flight Blocked', preBlocked, 'var(--fail)'],
+    ['GPU Prompts Saved', saved, 'var(--accent)'],
+  ].map(([label, val, color]) => `
+    <div class="kpi">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-val" style="color:${color}">${val}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('job-count').textContent = JOBS.length + ' jobs';
+  document.getElementById('jobs-list').innerHTML = JOBS.map(j => `
+    <button class="job-item ${j.job_id === selectedJobId ? 'active' : ''}"
+            onclick="selectJob('${esc(j.job_id)}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+        <span class="badge badge-info">${esc(j.scenario_tag)}</span>
+        ${statusBadge(j.status)}
+      </div>
+      <div style="font-weight:600;font-size:13px;margin-top:6px;">${esc(j.title)}</div>
+      <div class="mono" style="font-size:11px;color:var(--muted);margin-top:2px;">
+        ${esc(j.shot_label)} &bull; ${esc(j.pass_label)}
+      </div>
+    </button>
+  `).join('');
+}
+
+function selectJob(jobId) {
+  selectedJobId = jobId;
+  selectedFrameIdx = 0;
+  renderSidebarAndKPIs();
+  renderDetail();
+}
+
+function setTab(tabName) {
+  activeTab = tabName;
+  renderDetail();
+}
+
+function setFrame(idx) {
+  selectedFrameIdx = idx;
+  renderDetail();
+}
+
+function updateWipe(val) {
+  const top = document.getElementById('wipe-top-img');
+  const div = document.getElementById('wipe-div');
+  if (top && div) {
+    top.style.clipPath = `inset(0 ${100 - Number(val)}% 0 0)`;
+    div.style.left = val + '%';
+  }
+}
+
+function renderVisualTab(j, f) {
+  if (!f) return '<div style="color:var(--muted);">No frames recorded.</div>';
+  const pills = (j.frames || []).map((fr, idx) => `
+    <button class="pill ${idx === selectedFrameIdx ? 'active' : ''}"
+            onclick="setFrame(${idx})">
+      f${fr.frame} (${fr.status})
+    </button>
+  `).join('');
+
+  const leftSrc = f.input_preview || f.output_preview || '';
+  const rightSrc = f.output_preview || f.input_preview || '';
+  const iouPct = f.edge_iou != null ? Math.round(f.edge_iou * 1000) / 10 : null;
+  const iouColor = f.edge_iou == null ? 'var(--accent)' : (
+    f.edge_iou >= 0.85 ? 'var(--pass)' : 'var(--fail)'
+  );
+
+  return `
+    <div class="frame-pills">${pills}</div>
+    ${f.quarantine_reason ? `
+      <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);
+                  border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;">
+        <strong>Gatekeeper Reason:</strong> ${esc(f.quarantine_reason)}
+      </div>` : ''}
+    <div class="grid-2">
       <div>
-        <h1 style="margin:0;font-size:24px;">${esc(REPORT.title)}</h1>
-        <div class="mono" style="font-size:12px;color:var(--muted);margin-top:4px;">
-          Generated ${esc(REPORT.generated_at)}
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;">
+          <strong>Before / After Wipe</strong>
+          <span class="mono" style="color:var(--muted);">${esc(f.resolution)}</span>
+        </div>
+        <div class="wipe-wrap">
+          <img src="${esc(rightSrc)}" alt="Output" />
+          <img src="${esc(leftSrc)}" id="wipe-top-img" class="wipe-top" alt="Input" />
+          <div class="wipe-divider" id="wipe-div"></div>
+          <span class="wipe-label left">Input Beauty</span>
+          <span class="wipe-label right">${f.output_preview ? 'AI Output' : 'Blocked'}</span>
+        </div>
+        <input class="wipe-slider" type="range" min="0" max="100" value="50"
+               oninput="updateWipe(this.value)" />
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;">
+          <strong>Sobel Edge-Drift Diagnostic</strong>
+          <span class="mono" style="color:${iouColor};">
+            ${iouPct != null ? 'IoU ' + iouPct.toFixed(1) + '% (min 85%)' : 'No Edge Check'}
+          </span>
+        </div>
+        <div class="wipe-wrap">
+          ${f.edge_overlay
+            ? `<img src="${esc(f.edge_overlay)}" alt="Sobel Edge Overlay" />`
+            : `<img src="${esc(leftSrc)}" alt="Input Plate" />`}
+        </div>
+        <div class="legend" style="margin-top:8px;">
+          <span><i class="dot" style="background:#22c55e;"></i>Matched Edge</span>
+          <span><i class="dot" style="background:#38bdf8;"></i>Missing CG Edge</span>
+          <span><i class="dot" style="background:#ef4444;"></i>Drifted AI Edge</span>
         </div>
       </div>
-      <span class="badge badge-info">Offline Self-Contained Report</span>
     </div>
-    <div class="kpi-grid">
-      <div class="kpi"><div class="kpi-label">Jobs</div><div class="kpi-val">${jobs.length}</div></div>
-      <div class="kpi"><div class="kpi-label">Published EXRs</div><div class="kpi-val" style="color:var(--pass)">${pub}</div></div>
-      <div class="kpi"><div class="kpi-label">Quarantined</div><div class="kpi-val" style="color:var(--warn)">${quar}</div></div>
-      <div class="kpi"><div class="kpi-label">Pre-Flight Blocked</div><div class="kpi-val" style="color:var(--fail)">${preBlocked}</div></div>
+
+    <div class="grid-2" style="margin-top:14px;">
+      <div class="card" style="background:var(--panel-2);">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Structural Edge IoU</div>
+        <div class="meter-bar">
+          <div class="meter-fill" style="width:${iouPct ?? 0}%;background:${iouColor};"></div>
+        </div>
+        <div class="mono" style="font-size:12px;margin-top:6px;">
+          seed=${f.seed} | graph=${esc(f.graph_sha256.slice(0, 16))}...
+        </div>
+      </div>
+      <div class="card" style="background:var(--panel-2);">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
+          Inter-Frame Temporal Delta (max 0.20)
+        </div>
+        <div class="mono" style="font-size:14px;">
+          ${f.temporal_delta != null ? f.temporal_delta.toFixed(5) : 'N/A (single/first frame)'}
+        </div>
+        ${f.output_file ? `<div class="mono" style="font-size:11px;color:var(--muted);margin-top:4px;word-break:break-all;">${esc(f.output_file)}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderCheckTable(title, report) {
+  if (!report) return '';
+  const rows = (report.checks || []).map(c => `
+    <tr>
+      <td>${statusBadge(c.status)}</td>
+      <td class="mono">${esc(c.check_name)}${c.frame != null ? ' [f' + c.frame + ']' : ''}</td>
+      <td>${esc(c.message)}</td>
+    </tr>
+  `).join('');
+  return `
+    <div style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <strong>${esc(title)}</strong>
+        ${statusBadge(report.passed ? 'pass' : 'fail')}
+      </div>
+      <table class="checks">
+        <thead><tr><th>Status</th><th>Check</th><th>Message</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderLineageTab(j, f) {
+  const attrs = f ? Object.entries(f.exr_attributes || {}) : [];
+  const attrRows = attrs.length
+    ? attrs.map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')
+    : '<tr><td colspan="2" style="color:var(--muted);">No stamped EXR attributes (frame was blocked/quarantined).</td></tr>';
+  const rezHtml = (j.rez_packages || []).map(p => `<span class="badge badge-info">${esc(p)}</span>`).join(' ');
+  const manifestJson = j.manifest ? JSON.stringify(j.manifest, null, 2) : 'No manifest written (blocked at pre-flight).';
+
+  return `
+    <div style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+      <span style="font-size:12px;color:var(--muted);">Rez Environment:</span>
+      ${rezHtml || '<span style="font-size:12px;color:var(--muted);">none</span>'}
+    </div>
+    <div style="margin-bottom:16px;">
+      <strong style="display:block;margin-bottom:6px;">
+        Stamped OpenEXR Header Attributes (Frame ${f ? f.frame : '-'})
+      </strong>
+      <table class="checks">
+        <thead><tr><th>Attribute Key</th><th>Value</th></tr></thead>
+        <tbody>${attrRows}</tbody>
+      </table>
+    </div>
+    <div>
+      <strong style="display:block;margin-bottom:6px;">LineageManifest JSON</strong>
+      <pre class="codebox" style="max-height:360px;">${esc(manifestJson)}</pre>
+    </div>
+  `;
+}
+
+function renderDiffTab() {
+  return `
+    <div style="margin-bottom:14px;">
+      <strong style="display:block;margin-bottom:6px;">
+        Interactive Contract &amp; Graph Diff Sandbox (v001 Baseline)
+      </strong>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+        Test parameter overrides against <code>contract.yaml</code> bounds (e.g., try
+        <code>denoise = 0.99</code> to trigger a contract rejection).
+      </div>
+      <div class="form-grid">
+        <div class="field"><label>steps (4..60)</label><input id="df-steps" type="number" value="28" /></div>
+        <div class="field"><label>cfg (1.0..15.0)</label><input id="df-cfg" type="number" step="0.5" value="7.0" /></div>
+        <div class="field"><label>denoise (0.05..0.85)</label><input id="df-denoise" type="number" step="0.05" value="0.45" /></div>
+        <div class="field"><label>controlnet_strength (0..1)</label><input id="df-cn" type="number" step="0.05" value="0.85" /></div>
+        <div class="field"><label>sampler_name</label>
+          <select id="df-sampler">
+            <option value="dpmpp_2m">dpmpp_2m</option>
+            <option value="euler">euler</option>
+            <option value="euler_ancestral">euler_ancestral</option>
+            <option value="dpmpp_sde">dpmpp_sde</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="computeClientDiff()">Compute Diff &amp; Validate</button>
+      <div id="diff-error" style="margin-top:10px;"></div>
+    </div>
+    <div>
+      <strong style="display:block;margin-bottom:6px;">Canonical Graph Diff Output</strong>
+      <pre class="codebox" id="diff-output">${esc(currentDiffText)}</pre>
+    </div>
+  `;
+}
+
+async function computeClientDiff() {
+  const errEl = document.getElementById('diff-error');
+  const outEl = document.getElementById('diff-output');
+  const base = { steps: 24, cfg: 6.5, denoise: 0.45, controlnet_strength: 0.85, sampler_name: 'dpmpp_2m' };
+  const steps = Number(document.getElementById('df-steps').value);
+  const cfg = Number(document.getElementById('df-cfg').value);
+  const denoise = Number(document.getElementById('df-denoise').value);
+  const cn = Number(document.getElementById('df-cn').value);
+  const sampler = document.getElementById('df-sampler').value;
+
+  const errs = [];
+  if (!Number.isInteger(steps) || steps < 4 || steps > 60) errs.push("Parameter 'steps' must be an int in [4, 60]");
+  if (!Number.isFinite(cfg) || cfg < 1.0 || cfg > 15.0) errs.push("Parameter 'cfg' outside [1.0, 15.0]");
+  if (!Number.isFinite(denoise) || denoise < 0.05 || denoise > 0.85) errs.push("Parameter 'denoise' outside [0.05, 0.85]");
+  if (!Number.isFinite(cn) || cn < 0.0 || cn > 1.0) errs.push("Parameter 'controlnet_strength' outside [0.0, 1.0]");
+  if (errs.length) {
+    errEl.innerHTML = '<div class="badge badge-fail">CONTRACT VIOLATION: ' + esc(errs[0]) + '</div>';
+    return;
+  }
+
+  const next = { steps, cfg, denoise, controlnet_strength: cn, sampler_name: sampler };
+  const changes = [];
+  if (cfg !== base.cfg) changes.push(`  ~ node 9 (KSampler).cfg: ${base.cfg} -> ${cfg}`);
+  if (denoise !== base.denoise) changes.push(`  ~ node 9 (KSampler).denoise: ${base.denoise} -> ${denoise}`);
+  if (sampler !== base.sampler_name) changes.push(`  ~ node 9 (KSampler).sampler_name: '${base.sampler_name}' -> '${sampler}'`);
+  if (steps !== base.steps) changes.push(`  ~ node 9 (KSampler).steps: ${base.steps} -> ${steps}`);
+  if (cn !== base.controlnet_strength) changes.push(`  ~ node 7 (ControlNetApply).strength: ${base.controlnet_strength} -> ${cn}`);
+
+  let sha = 'e3b0c44298fc';
+  if (window.crypto && crypto.subtle) {
+    const buf = new TextEncoder().encode(JSON.stringify(next));
+    const dig = await crypto.subtle.digest('SHA-256', buf);
+    sha = Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+  }
+  const v1Sha = REPORT.graph_diff ? REPORT.graph_diff.v1_sha256.slice(0, 12) : '7f11eab537e2';
+  currentDiffText = changes.length
+    ? `Graph Diff: ${v1Sha} -> ${sha}\n` + changes.join('\n')
+    : `Graphs identical (sha256=${v1Sha})`;
+  errEl.innerHTML = '<div class="badge badge-pass">CONTRACT VALIDATED (v2 sha=' + esc(sha) + ')</div>';
+  outEl.textContent = currentDiffText;
+}
+
+function renderDetail() {
+  const j = JOBS.find(item => item.job_id === selectedJobId) || JOBS[0];
+  if (!j) {
+    document.getElementById('detail-pane').innerHTML = '<div style="padding:24px;color:var(--muted);">No jobs in report.</div>';
+    return;
+  }
+  const frame = (j.frames || [])[selectedFrameIdx] || (j.frames || [])[0];
+  const headerHtml = `
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;
+                padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:14px;">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <h2 style="margin:0;font-size:18px;">${esc(j.title)}</h2>
+          ${statusBadge(j.status)}
+        </div>
+        <div class="mono" style="font-size:12px;color:var(--muted);margin-top:4px;">
+          job_id=${esc(j.job_id)} | ${esc(j.shot_label)} | ${esc(j.pass_label)} |
+          colorspace=${esc(j.colorspace)} | dcc=${esc(j.dcc_source)}
+        </div>
+      </div>
+      <div class="mono" style="font-size:12px;color:var(--muted);text-align:right;">
+        <div>Contract: ${esc(j.contract_label)}</div>
+        <div>GPU Dispatched: ${j.gpu_prompts_dispatched}</div>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tab ${activeTab === 'visual' ? 'active' : ''}"
+              onclick="setTab('visual')">Visual Gate &amp; Edge Overlay</button>
+      <button class="tab ${activeTab === 'gates' ? 'active' : ''}"
+              onclick="setTab('gates')">Pre / Post-Flight Checks</button>
+      <button class="tab ${activeTab === 'lineage' ? 'active' : ''}"
+              onclick="setTab('lineage')">EXR Stamps &amp; Lineage</button>
+      <button class="tab ${activeTab === 'diff' ? 'active' : ''}"
+              onclick="setTab('diff')">Graph Diff Sandbox</button>
     </div>
   `;
 
-  let wipeIdx = 0;
-  jobs.forEach(j => {
-    const first = (j.frames || [])[0];
-    const framesHtml = (j.frames || []).slice(0, 1).map(f => {
-      const idx = wipeIdx++;
-      const leftSrc = f.input_preview || f.output_preview || '';
-      const rightSrc = f.output_preview || f.input_preview || '';
-      const iouText = f.edge_iou != null ? 'IoU ' + (f.edge_iou * 100).toFixed(1) + '%' : 'N/A';
-      return `
-        <div class="grid-2" style="margin-top:12px;">
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
-              <strong>Frame ${f.frame}: Input vs Output</strong>
-              <span class="mono" style="color:var(--muted);">${esc(f.resolution)}</span>
-            </div>
-            <div class="wipe-wrap">
-              <img src="${esc(rightSrc)}" alt="Output" />
-              <img src="${esc(leftSrc)}" id="wtop-${idx}" class="wipe-top" alt="Input" />
-              <div class="wipe-divider" id="wdiv-${idx}"></div>
-              <span class="wipe-label left">Input</span>
-              <span class="wipe-label right">${f.output_preview ? 'Output' : 'Blocked'}</span>
-            </div>
-            <input class="wipe-slider" type="range" min="0" max="100" value="50"
-                   oninput="moveWipe(${idx}, this.value)" />
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
-              <strong>Sobel Edge-Drift Diagnostic</strong>
-              <span class="mono">${esc(iouText)}</span>
-            </div>
-            <div class="wipe-wrap">
-              <img src="${esc(f.edge_overlay || leftSrc)}" alt="Diagnostic" />
-            </div>
-            <div class="legend" style="margin-top:8px;">
-              <span><i class="dot" style="background:#22c55e;"></i>Matched</span>
-              <span><i class="dot" style="background:#38bdf8;"></i>Missing CG</span>
-              <span><i class="dot" style="background:#ef4444;"></i>Drifted AI</span>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
+  let bodyHtml = '';
+  if (activeTab === 'visual') bodyHtml = renderVisualTab(j, frame);
+  else if (activeTab === 'gates') bodyHtml = renderCheckTable('Pre-Flight Validation Gate', j.preflight_report) + renderCheckTable('Post-Flight Quality Gate', j.postflight_report);
+  else if (activeTab === 'lineage') bodyHtml = renderLineageTab(j, frame);
+  else bodyHtml = renderDiffTab();
 
-    const attrPairs = first ? Object.entries(first.exr_attributes || {}) : [];
-    const attrsHtml = attrPairs.length
-      ? '<div style="margin-top:12px;"><strong style="font-size:13px;">Stamped EXR Attributes:</strong><pre class="codebox" style="margin-top:6px;">' +
-        esc(attrPairs.map(([k, v]) => k + ' = ' + v).join('\\n')) + '</pre></div>'
-      : '';
+  document.getElementById('detail-pane').innerHTML = headerHtml + bodyHtml;
+}
 
-    const gateList = [j.preflight_report, j.postflight_report].filter(Boolean);
-    const checksHtml = gateList.map(rep => `
-      <div style="margin-top:12px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;">
-          <strong>${esc(rep.stage.toUpperCase())} GATE</strong>
-          ${badge(rep.passed ? 'pass' : 'fail')}
-        </div>
-        <table class="checks">
-          <thead><tr><th>Status</th><th>Check</th><th>Details</th></tr></thead>
-          <tbody>
-            ${(rep.checks || []).map(c => `<tr><td>${badge(c.status)}</td><td class="mono">${esc(c.check_name)}</td><td>${esc(c.message)}</td></tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    `).join('');
-
-    html += `
-      <section class="card scenario-card">
-        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center;">
-          <div>
-            <span class="badge badge-info">${esc(j.scenario_tag)}</span>
-            <strong style="font-size:17px;margin-left:8px;">${esc(j.title)}</strong>
-          </div>
-          ${badge(j.status)}
-        </div>
-        <div class="mono" style="font-size:12px;color:var(--muted);margin-top:6px;">
-          ${esc(j.shot_label)} | ${esc(j.pass_label)} | ${esc(j.colorspace)} |
-          GPU Dispatched: ${j.gpu_prompts_dispatched}
-        </div>
-        ${framesHtml}
-        ${attrsHtml}
-        ${checksHtml}
-      </section>
-    `;
-  });
-
-  if (REPORT.graph_diff) {
-    html += `
-      <section class="card scenario-card">
-        <h2 style="margin:0 0 8px 0;font-size:17px;">Workflow Graph Diff (${esc(REPORT.graph_diff.v1_label)} &rarr; ${esc(REPORT.graph_diff.v2_label)})</h2>
-        <pre class="codebox">${esc(REPORT.graph_diff.human_text)}</pre>
-      </section>
-    `;
-  }
-
-  document.getElementById('root').innerHTML = html;
-})();
+renderSidebarAndKPIs();
+renderDetail();
 </script>
 </body>
 </html>

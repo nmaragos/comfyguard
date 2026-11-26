@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   verify:
     name: Verify (Python ${{ matrix.python-version }})
@@ -34,12 +43,32 @@ jobs:
       - name: Run pytest suite
         run: uv run pytest -v
 
-      - name: Run portfolio demo and export HTML report
-        run: uv run python demo/run_portfolio_demo.py --report demo_report.html
+      - name: Build static interactive demo site
+        if: matrix.python-version == '3.13'
+        run: uv run python demo/run_portfolio_demo.py --report site/index.html
 
-      - name: Upload demo HTML report artifact
+      - name: Upload demo HTML artifact
         if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v4
         with:
           name: comfyguard-demo-report
-          path: demo_report.html
+          path: site/index.html
+
+      - name: Upload GitHub Pages artifact
+        if: matrix.python-version == '3.13' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    name: Deploy Live Demo (GitHub Pages)
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
